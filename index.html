@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lightshow</title>
+<meta name="description" content="Lightshow: old-school music visuals that dance to whatever a browser tab is playing.">
+<style>
+  /* ==== a mid-nineties desktop: grey bevelled windows, navy title bars, square buttons, a grey taskbar ==== */
+  :root {
+    --face: #c0c0c0; --hi: #fff; --lite: #dfdfdf; --shade: #808080; --dark: #0a0a0a; --navy: #000080; --ink: #000; --tip: #ffffe1;
+    --raised: inset -1px -1px var(--dark), inset 1px 1px var(--hi), inset -2px -2px var(--shade), inset 2px 2px var(--lite);
+    --pressed: inset -1px -1px var(--hi), inset 1px 1px var(--dark), inset -2px -2px var(--lite), inset 2px 2px var(--shade);
+    --field: inset -1px -1px var(--hi), inset 1px 1px var(--shade), inset -2px -2px var(--lite), inset 2px 2px var(--dark);
+    --ui: "MS Sans Serif", "Microsoft Sans Serif", Tahoma, Geneva, Verdana, sans-serif;
+    --thumb: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='21'%3E%3Cpath d='M0 0h11v16l-5.5 5L0 16z' fill='%230a0a0a'/%3E%3Cpath d='M0 0h10v16l-4.5 4L0 16z' fill='%23fff'/%3E%3Cpath d='M1 1h9v15l-4.5 4L1 16z' fill='%23808080'/%3E%3Cpath d='M1 1h8v14.6l-3.5 3.2L1 15.6z' fill='%23c0c0c0'/%3E%3C/svg%3E");
+    --drop: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='17'%3E%3Crect width='16' height='17' fill='%230a0a0a'/%3E%3Crect width='15' height='16' fill='%23dfdfdf'/%3E%3Crect x='1' y='1' width='14' height='15' fill='%23808080'/%3E%3Crect x='1' y='1' width='13' height='14' fill='%23fff'/%3E%3Crect x='2' y='2' width='12' height='13' fill='%23c0c0c0'/%3E%3Cpath d='M4.5 7h7L8 10.5z' fill='%23000'/%3E%3C/svg%3E");
+    --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13'%3E%3Cpath d='M3 6v3l2.5 2.5L10 6V3L5.500 7.500z' fill='%23000'/%3E%3C/svg%3E");
+    --checker: repeating-conic-gradient(#fff 0 25%, #c0c0c0 0 50%) 0 0 / 2px 2px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; height: 100dvh; margin: 0; }
+  body { display: flex; flex-direction: column; overflow: hidden; background: #000; color: var(--ink); font: 11px/1.3 var(--ui); -webkit-font-smoothing: none; }
+  button, input, select { font: inherit; color: inherit; }
+  .desk { position: relative; flex: 1; min-height: 0; }
+  main { position: absolute; inset: 0; }   /* the picture runs under the window */
+  main canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: pointer; }
+
+  /* tooltips: the hint, and short messages */
+  .balloons { position: absolute; left: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; max-width: min(320px, calc(100% - 16px)); }
+  .balloon { margin: 0; padding: 3px 6px; border: 1px solid #000; background: var(--tip); box-shadow: 1px 1px 0 rgba(0,0,0,.5); }
+  #hint.gone, #toast:not(.show) { display: none; }
+
+  /* the window */
+  .window { position: absolute; z-index: 2; top: 14px; right: 14px; width: 292px; max-height: calc(100% - 28px); display: flex; flex-direction: column; padding: 3px;
+    background: var(--face); box-shadow: var(--raised), 2px 2px 0 rgba(0,0,0,.35); }
+  .title { flex: 0 0 auto; height: 18px; padding: 0 2px 0 3px; display: flex; align-items: center; gap: 2px; background: var(--navy); cursor: default; user-select: none; }
+  .title .icon { width: 13px; height: 13px; margin-right: 2px; border-radius: 50%; border: 1px solid #fff; background: radial-gradient(circle, #fff 0 16%, transparent 18%), conic-gradient(from 210deg, var(--ramp)); }
+  .title h1 { flex: 1; margin: 0; font: 700 11px var(--ui); color: #fff; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb { width: 16px; height: 14px; padding: 0; display: grid; place-items: center; border: 0; background: var(--face); box-shadow: var(--raised); cursor: pointer; }
+  .tb:active { box-shadow: var(--pressed); } .tb:active svg { transform: translate(1px, 1px); }
+  .tb svg { width: 10px; height: 10px; } .tb svg [fill="#fff"] { fill: #000; } .tb svg [stroke] { stroke: #000; }
+  .tb.close { margin-left: 2px; }
+  .window .body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 6px 6px; }
+  .window.min .body { display: none; }
+  .lead { margin: 0 2px 9px; }
+
+  /* tabs and their sheet */
+  .tabs { display: flex; padding-left: 2px; position: relative; z-index: 1; }
+  .tabs button { margin: 2px 0 0; padding: 3px 9px 3px; border: 0; background: var(--face); cursor: pointer; border-radius: 3px 3px 0 0;
+    box-shadow: inset 1px 1px var(--hi), inset -1px 0 var(--dark), inset -2px 0 var(--shade), inset 2px 2px var(--lite); }
+  .tabs button[aria-selected=true] { margin: 0 -2px -2px; padding: 4px 11px 6px; position: relative; }
+  .sheet { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 9px 8px; background: var(--face); box-shadow: var(--raised); }
+  .sheet section[hidden] { display: none; }
+  fieldset { margin: 0 0 11px; padding: 5px 8px 8px; border: 1px solid var(--shade); box-shadow: 1px 1px 0 var(--hi), inset 1px 1px 0 var(--hi); min-width: 0; }
+  fieldset:last-child { margin-bottom: 2px; }
+  legend { padding: 0 3px; }
+  .row { display: grid; grid-template-columns: 78px 1fr 28px; align-items: center; gap: 6px; min-height: 27px; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  .row.wide { grid-template-columns: 78px 1fr; }
+  .check { display: flex; align-items: center; gap: 6px; min-height: 24px; cursor: pointer; }
+
+  /* controls */
+  .btn { min-width: 75px; min-height: 23px; padding: 2px 12px; border: 0; background: var(--face); box-shadow: var(--raised); cursor: pointer; }
+  .btn:active { box-shadow: var(--pressed); padding: 3px 11px 1px 13px; }
+  .btn:focus-visible, .tabs button:focus-visible, .task:focus-visible, .start:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+  .actions { display: flex; justify-content: flex-end; gap: 6px; padding-top: 8px; }
+  select { width: 100%; height: 21px; padding: 0 20px 0 5px; border: 0; border-radius: 0; background: #fff var(--drop) no-repeat right 2px center; box-shadow: var(--field); -webkit-appearance: none; appearance: none; }
+  select:focus-visible { outline: 1px dotted #000; outline-offset: -4px; }
+  input[type=checkbox] { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; margin: 0; flex: 0 0 auto; background: #fff; box-shadow: var(--field); }
+  input[type=checkbox]:checked { background: #fff var(--tick) center / 13px no-repeat; }
+  input[type=checkbox]:focus-visible { outline: 1px dotted #000; outline-offset: 1px; }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 23px; margin: 0; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 4px; background: var(--face); box-shadow: inset 1px 1px var(--shade), inset -1px -1px var(--hi), inset 2px 2px var(--dark); }
+  input[type=range]::-moz-range-track { height: 4px; background: var(--face); box-shadow: inset 1px 1px var(--shade), inset -1px -1px var(--hi), inset 2px 2px var(--dark); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 11px; height: 21px; margin-top: -8px; border: 0; background: var(--thumb) no-repeat; }
+  input[type=range]::-moz-range-thumb { width: 11px; height: 21px; border: 0; border-radius: 0; background: var(--thumb) no-repeat; }
+  input[type=range]:focus-visible { outline: 1px dotted #000; }
+
+  /* the taskbar */
+  .taskbar { flex: 0 0 28px; display: flex; align-items: center; gap: 4px; padding: 2px 2px 0; background: var(--face); box-shadow: inset 0 1px var(--lite), inset 0 2px var(--hi); user-select: none; position: relative; z-index: 4; }
+  .start, .task { height: 22px; min-width: 0; padding: 0 8px; border: 0; background: var(--face); box-shadow: var(--raised); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
+  .start { font-weight: 700; padding: 0 7px 0 5px; margin-right: 4px; flex: 0 0 auto; }
+  .start::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 1px solid #000; background: radial-gradient(circle, #fff 0 16%, #000 17% 22%, transparent 24%), conic-gradient(from 210deg, var(--ramp)); }
+  .start:active, .task:active, .start.on, .task.on { box-shadow: var(--pressed); padding-top: 2px; }
+  .start.on, .task.on { background: var(--checker); font-weight: 700; }
+  .tray { margin-left: auto; height: 22px; display: flex; align-items: center; gap: 7px; padding: 0 9px; white-space: nowrap; box-shadow: inset 1px 1px var(--shade), inset -1px -1px var(--hi); }
+  .tray .dot { width: 7px; height: 7px; background: var(--shade); box-shadow: inset 1px 1px var(--dark); }
+  .tray.live .dot { background: #00d000; box-shadow: inset 1px 1px #006000; }
+
+  /* full screen: only the picture */
+  :fullscreen .window, :fullscreen .taskbar, :fullscreen .balloons { display: none; }
+
+  /* small screens: the window becomes a sheet under the picture */
+  @media (max-width: 820px) {
+    .desk { display: flex; flex-direction: column; }
+    main { position: relative; inset: auto; flex: 1; min-height: 0; }
+    .window { position: static; width: auto; max-height: 46vh; margin: 0 4px 4px; box-shadow: var(--raised); }
+    .balloons { bottom: auto; top: 8px; } #src { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="desk">
+  <main><canvas id="c" aria-label="A light show that moves to music. Click for the next scene."></canvas></main>
+  <div class="balloons">
+    <p class="balloon" id="toast" role="status"></p>
+    <p class="balloon tail" id="hint">Press <b>Space</b> and pick a tab that is playing music</p>
+  </div>
+  <aside class="window" id="win">
+    <div class="title">
+      <i class="icon"></i><h1>Lightshow</h1>
+      <button type="button" class="tb" id="minBtn" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 12 12"><rect x="2" y="8" width="6" height="2.5" fill="#fff"/></svg></button>
+      <button type="button" class="tb" id="maxBtn" title="Full screen" aria-label="Full screen"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="#fff"/><rect x="1" y="1" width="10" height="3" fill="#fff"/></svg></button>
+      <button type="button" class="tb close" id="closeBtn" title="Close" aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="body">
+      <p class="lead">Visuals that dance to whatever a tab is playing.</p>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div class="sheet" id="panel"></div>
+      <div class="actions"><button type="button" class="btn" id="resetBtn" title="Put every setting back where it started">Restore Defaults</button></div>
+    </div>
+  </aside>
+</div>
+<footer class="taskbar">
+  <button type="button" class="start" id="listenBtn" title="Share a browser tab and its sound (Space)"><span>Listen to a tab</span></button>
+  <button type="button" class="task" id="micBtn" title="Listen through the microphone instead">Microphone</button>
+  <button type="button" class="task" id="fsBtn" title="Fill the screen with the picture (F)">Full screen</button>
+  <div class="tray" id="legend"><i class="dot"></i><span id="src">Not listening</span><time id="clock"></time></div>
+</footer>
+
+<script>
+(() => {
+'use strict';
+
+/* ==== settings ==== */
+const PALETTES = {   // each loops back to its first colour; the picture wears one colour at a time and drifts along the loop
+  neon:   ['#ff2bf0','#ff3b30','#19ff3c','#2f6bff','#ff2bf0'],
+  aurora: ['#00ff9d','#00c8ff','#3a4bff','#b23cff','#00ff9d'],
+  ember:  ['#ff2a00','#ff8a00','#ffe14a','#ff3d6e','#ff2a00'],
+  ocean:  ['#0a3cff','#00a2ff','#7df9ff','#e8fbff','#0a3cff'],
+  candy:  ['#ff3df2','#8a4bff','#2ee6ff','#ffe45c','#ff3df2'],
+  phosphor: ['#1bff4a','#b6ff3a','#0f9d3a','#7dffb0','#1bff4a'],
+};
+const SCENES = ['tunnel', 'bars', 'scope', 'burst'];
+
+/* every setting, by tab. Sliders are [start, lowest, highest, step], in numbers you would say out loud. */
+const SPEC = {
+  scene: {
+    style:   {options:SCENES, def:'tunnel'},
+    palette: {options:Object.keys(PALETTES), def:'neon'},
+    shuffle: {def:true, label:'Shuffle scenes'},
+    hold:    [10, 2, 60, 1],
+    morph:   [4, 1, 12, .5],
+  },
+  motion: {
+    trails: [92, 0, 98, 1],
+    smear:  [50, 0, 100, 1],
+    zoom:   [40, -40, 100, 1],
+    spin:   [25, -100, 100, 1],
+    detail: [35, 10, 100, 1],
+    colourSpeed: [30, 0, 100, 1],
+  },
+  sound: {
+    gain:    [100, 30, 300, 1],
+    punch:   [50, 0, 100, 1],
+    smooth:  [70, 0, 95, 1],
+    bars:    [64, 16, 128, 1],
+  },
+};
+const GROUPS = {scene:[['Scene', ['style', 'palette']], ['Shuffle', ['shuffle', 'hold', 'morph']]], motion:[['Trails', ['trails', 'smear', 'detail']], ['Movement', ['zoom', 'spin', 'colourSpeed']]], sound:[['Listening', ['gain', 'smooth']], ['Response', ['punch', 'bars']]]};
+const words = k => { const w = k.replace(/([A-Z])/g, ' $1').toLowerCase(); return w[0].toUpperCase() + w.slice(1); };
+const el = (tag, props, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+// kit: holds the values, draws the controls, remembers them between visits
+const kit = (() => {
+  const KEY = 'lightshow:settings', def = s => Array.isArray(s) ? s[0] : s.def, subs = [], ctl = {}, values = {};
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) {}
+  for (const [g, items] of Object.entries(SPEC)) { values[g] = {}; for (const [k, s] of Object.entries(items)) {
+    const v = saved[g] && saved[g][k], ok = Array.isArray(s) ? typeof v === 'number' && v >= s[1] && v <= s[2] : s.options ? s.options.includes(v) : typeof v === 'boolean';
+    values[g][k] = ok ? v : def(s);
+  } }
+  const changed = () => { try { localStorage.setItem(KEY, JSON.stringify(values)); } catch (e) {} subs.forEach(f => f(values)); };
+  const set = (g, k, v, quiet) => { if (values[g][k] === v) return; values[g][k] = v; if (ctl[g + '.' + k]) ctl[g + '.' + k](v); if (!quiet) changed(); };
+  const tabs = document.getElementById('tabs'), panel = document.getElementById('panel');
+  Object.keys(SPEC).forEach((g, gi) => {
+    const sheet = el('section', {hidden:gi > 0}), tab = el('button', {type:'button', textContent:words(g)});
+    tab.setAttribute('role', 'tab'); tab.setAttribute('aria-selected', gi === 0);
+    tab.onclick = () => { [...tabs.children].forEach((t, i) => { t.setAttribute('aria-selected', t === tab); panel.children[i].hidden = t !== tab; }); };
+    for (const [title, keys] of GROUPS[g]) {
+      const box = el('fieldset', {}, el('legend', {textContent:title}));
+      for (const k of keys) {
+        const s = SPEC[g][k], id = `${g}-${k}`, path = g + '.' + k;
+        if (Array.isArray(s)) {
+          const input = el('input', {type:'range', id, min:s[1], max:s[2], step:s[3], value:values[g][k]}), out = el('output', {textContent:values[g][k]});
+          input.oninput = () => { out.textContent = +input.value; set(g, k, +input.value); };
+          ctl[path] = v => { input.value = v; out.textContent = v; };
+          box.append(el('div', {className:'row'}, el('label', {htmlFor:id, textContent:words(k)}), input, out));
+        } else if (s.options) {
+          const input = el('select', {id}, ...s.options.map(o => el('option', {value:o, textContent:words(o)}))); input.value = values[g][k];
+          input.onchange = () => set(g, k, input.value); ctl[path] = v => { input.value = v; };
+          box.append(el('div', {className:'row wide'}, el('label', {htmlFor:id, textContent:words(k)}), input));
+        } else {
+          const input = el('input', {type:'checkbox', checked:values[g][k]});
+          input.onchange = () => set(g, k, input.checked); ctl[path] = v => { input.checked = v; };
+          box.append(el('label', {className:'check'}, input, s.label || words(k)));
+        }
+      }
+      sheet.append(box);
+    }
+    tabs.append(tab); panel.append(sheet);
+  });
+  return {values, subscribe:f => subs.push(f),
+    setValue(path, v) { const [g, k] = path.split('.'); set(g, k, v); },
+    resetValues() { for (const [g, items] of Object.entries(SPEC)) for (const [k, s] of Object.entries(items)) set(g, k, def(s), true); changed(); }};
+})();
+
+const read = v => ({style:SCENES.includes(v.scene.style) ? v.scene.style : 'tunnel', palette:v.scene.palette, shuffle:v.scene.shuffle, hold:v.scene.hold, morph:v.scene.morph,
+  trails:v.motion.trails / 100, zoom:v.motion.zoom / 100, spin:v.motion.spin / 100, smear:v.motion.smear / 100, detail:v.motion.detail, drift:v.motion.colourSpeed / 100,
+  gain:v.sound.gain / 100, punch:v.sound.punch / 100, smooth:v.sound.smooth / 100, bars:v.sound.bars});
+const P = read(kit.values);
+kit.subscribe(v => { const was = P.palette, scene = P.style; Object.assign(P, read(v)); if (was !== P.palette) buildLut(); if (scene !== P.style) sceneClock = 0; layout(); });
+
+/* ==== colour: palette stops mixed in OKLab into a looping 256-step ramp ==== */
+const toLin = c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4, toS = c => c <= .0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - .055;
+function oklab(hex) {
+  const n = parseInt(hex.slice(1), 16), r = toLin((n >> 16) / 255), g = toLin((n >> 8 & 255) / 255), b = toLin((n & 255) / 255);
+  const l = Math.cbrt(.4122214708 * r + .5363325363 * g + .0514459929 * b), m = Math.cbrt(.2119034982 * r + .6806995451 * g + .1073969566 * b), s = Math.cbrt(.0883024619 * r + .2817188376 * g + .6299787005 * b);
+  return [.2104542553 * l + .7936177850 * m - .0040720468 * s, 1.9779984951 * l - 2.4285922050 * m + .4505937099 * s, .0259040371 * l + .7827717662 * m - .8086757660 * s];
+}
+function css([L, a, b]) {
+  const l = (L + .3963377774 * a + .2158037573 * b) ** 3, m = (L - .1055613458 * a - .0638541728 * b) ** 3, s = (L - .0894841775 * a - 1.2914855480 * b) ** 3;
+  const ch = x => Math.round(255 * Math.min(1, Math.max(0, toS(x))));
+  return `rgb(${ch(4.0767416621 * l - 3.3077115913 * m + .2309699292 * s)},${ch(-1.2684380046 * l + 2.6097574011 * m - .3413193965 * s)},${ch(-.0041960863 * l - .7034186147 * m + 1.7076147010 * s)})`;
+}
+let LUT = [];
+function buildLut() {
+  const stops = PALETTES[P.palette].map(oklab), n = stops.length - 1;
+  LUT = Array.from({length:256}, (_, i) => { const x = i / 256 * n, k = Math.floor(x), f = x - k, A = stops[k], B = stops[k + 1]; return css(A.map((v, j) => v + (B[j] - v) * f)); });
+  document.documentElement.style.setProperty('--ramp', PALETTES[P.palette].join(','));
+}
+buildLut();
+let hue = 0;
+const col = x => LUT[Math.floor((((x + hue) % 1) + 1) % 1 * 256) & 255];
+
+/* ==== sound: a shared tab (or the microphone); until then, and whenever it is silent, the picture stays empty ==== */
+const WAVE = 512, wave = new Float32Array(WAVE);
+let bars = new Float32Array(P.bars), peaks = new Float32Array(P.bars);
+let bass = 0, mid = 0, treble = 0, kick = 0, bassAvg = .2, presence = 0;
+let actx = null, analyser = null, source = null, stream = null, freq = null, td = null;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const srcEl = document.getElementById('src'), legend = document.getElementById('legend'), hint = document.getElementById('hint');
+const listenBtn = document.getElementById('listenBtn');
+
+const toastEl = document.getElementById('toast'); let toastTimer = 0;
+function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4200); }
+
+function setSource(label) {
+  srcEl.textContent = label || 'Not listening'; legend.classList.toggle('live', !!label);
+  listenBtn.firstElementChild.textContent = label ? 'Stop listening' : 'Listen to a tab'; listenBtn.classList.toggle('on', !!label);
+}
+function stopListening() {
+  if (stream) stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
+  if (source) source.disconnect();
+  stream = source = null; setSource('');
+}
+async function attach(s, label) {
+  stopListening();
+  actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+  await actx.resume();
+  if (!analyser) { analyser = actx.createAnalyser(); analyser.fftSize = 2048; analyser.minDecibels = -85; analyser.maxDecibels = -20; freq = new Uint8Array(analyser.frequencyBinCount); td = new Float32Array(analyser.fftSize); }
+  stream = s;
+  source = actx.createMediaStreamSource(new MediaStream(s.getAudioTracks()));
+  source.connect(analyser);   // not connected to the speakers: the tab keeps playing its own sound
+  s.getTracks().forEach(t => t.onended = () => { if (stream === s) stopListening(); });
+  setSource(label); hint.classList.add('gone');
+}
+async function listenTab() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { toast('This browser cannot share tab sound. Try Chrome or Edge, or use Mic.'); return; }
+  let s;
+  try {
+    s = await navigator.mediaDevices.getDisplayMedia({
+      video: {frameRate:1, width:320, height:180},   // the browser insists on a picture; keep it tiny, it is never shown
+      audio: {echoCancellation:false, noiseSuppression:false, autoGainControl:false, suppressLocalAudioPlayback:false},
+      selfBrowserSurface:'exclude', systemAudio:'include',
+    });
+  } catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Sharing could not start. Try Chrome or Edge, or use Mic.'); return; }
+  if (!s.getAudioTracks().length) { s.getTracks().forEach(t => t.stop()); toast('No sound came along. Pick a tab and switch on “Also share tab audio”.'); return; }
+  attach(s, 'Tab audio');
+}
+async function listenMic() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('This browser has no microphone access here.'); return; }
+  try { attach(await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false, noiseSuppression:false, autoGainControl:false}}), 'Microphone'); }
+  catch (e) { toast('The microphone was not allowed.'); }
+}
+
+function analyse(dt, t) {
+  if (bars.length !== P.bars) { bars = new Float32Array(P.bars); peaks = new Float32Array(P.bars); }
+  const n = bars.length;
+  if (source) {
+    analyser.smoothingTimeConstant = P.smooth;
+    analyser.getByteFrequencyData(freq); analyser.getFloatTimeDomainData(td);
+    const hz = actx.sampleRate / analyser.fftSize, lo = 40, span = 16000 / lo;
+    for (let i = 0; i < n; i++) {   // bars are spread evenly by pitch, not by frequency
+      const b0 = Math.floor(lo * span ** (i / n) / hz), b1 = Math.min(freq.length, Math.max(b0 + 1, Math.ceil(lo * span ** ((i + 1) / n) / hz)));
+      let m = 0; for (let b = b0; b < b1; b++) if (freq[b] > m) m = freq[b];
+      bars[i] = Math.min(1.2, m / 255 * P.gain * (.8 + .6 * i / n));
+    }
+    let start = 0; for (let i = 0; i < 1024; i++) if (td[i] < 0 && td[i + 1] >= 0) { start = i; break; }   // start on a rising edge so the line holds still
+    const g = P.gain * 1.6; for (let j = 0; j < WAVE; j++) wave[j] = Math.max(-1, Math.min(1, td[start + j * 2] * g));
+  } else { bars.fill(0); wave.fill(0); }   // nothing to listen to: nothing to show
+  let loud = 0; for (let i = 0; i < n; i++) loud = Math.max(loud, bars[i]);
+  for (let j = 0; j < WAVE; j += 8) loud = Math.max(loud, Math.abs(wave[j]) * 2);
+  presence += ((loud > .04 ? 1 : 0) - presence) * Math.min(1, dt * (loud > .04 ? 8 : 1.2));   // the shapes come in fast with the sound and melt away when it stops
+  const band = (a, b) => { let s = 0; const i0 = Math.floor(a * n), i1 = Math.max(i0 + 1, Math.floor(b * n)); for (let i = i0; i < i1; i++) s += bars[i]; return Math.min(1, s / (i1 - i0)); };
+  for (let i = 0; i < n; i++) peaks[i] = Math.max(peaks[i] - dt * .4, Math.min(1, bars[i]));   // the little caps that hang and fall
+  bass = band(0, .14); mid = band(.25, .6); treble = band(.65, 1);
+  if (bass > bassAvg * 1.3 && bass > .22 && kick < .5) kick = 1;   // a beat: the bass jumps above its own recent level
+  bassAvg += (bass - bassAvg) * Math.min(1, dt * 2.5); kick *= Math.exp(-dt * 6);
+}
+
+/* ==== the picture: every frame the last one is redrawn slightly zoomed, turned and dimmed, then the new shape goes on top ==== */
+const winEl = document.getElementById('win'), canvas = document.getElementById('c'), ctx = canvas.getContext('2d', {alpha:false});
+let bufA = document.createElement('canvas'), bufB = document.createElement('canvas');
+let G = {W:1, H:1, cx:0, cy:0, s:1, fw:1, u:1};
+
+function layout() {
+  const cr = canvas.getBoundingClientRect(), ar = document.querySelector('aside').getBoundingClientRect();
+  const dpr = Math.min(devicePixelRatio || 1, 2), w = Math.max(1, Math.round(cr.width * dpr)), h = Math.max(1, Math.round(cr.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const k = Math.min(1, (200 + P.detail * 11) / Math.max(cr.width, cr.height)), W = Math.max(1, Math.round(cr.width * k)), H = Math.max(1, Math.round(cr.height * k));   // a small, soft buffer, as these old light shows were: chunky up close, glowing from a distance
+  for (const b of [bufA, bufB]) if (b.width !== W || b.height !== H) { b.width = W; b.height = H; }
+  const side = !winEl.classList.contains('min') && ar.width > 0 && ar.top < cr.bottom - 1 && ar.left > cr.left, fw = (side ? ar.left - cr.left : cr.width) * k;   // compose in the space beside the panel
+  G = {W, H, cx:fw / 2, cy:H / 2, s:Math.min(fw, H), fw, u:Math.min(fw, H) / 420};
+}
+
+/* Every scene is the same 512 strokes, arranged differently: two layers of 256 short lines, each with two ends, a colour and a width.
+   Because the scenes share their strokes, any scene can turn into any other by sliding each stroke from one place to the next. */
+const K = 256, N = 2 * K;
+const makeGeo = () => ({x0:new Float32Array(N), y0:new Float32Array(N), x1:new Float32Array(N), y1:new Float32Array(N), c:new Float32Array(N), w:new Float32Array(N), wh:new Float32Array(N)});
+const wv = q => { const x = Math.min(1, Math.max(0, q)) * (WAVE - 1), i = Math.min(WAVE - 2, Math.floor(x)); return wave[i] + (wave[i + 1] - wave[i]) * (x - i); };
+const fold = q => q < .5 ? q * 2 : 2 - 2 * q;   // there and back again, so a ring has no seam
+const put = (o, j, x0, y0, x1, y1, c, w, wh) => { o.x0[j] = x0; o.y0[j] = y0; o.x1[j] = x1; o.y1[j] = y1; o.c[j] = c; o.w[j] = w; o.wh[j] = wh; };
+
+const STYLES = {
+  // zoom / spin: how strongly the trails rush outwards and turn; oy: the height the trails flow away from
+  tunnel: {zoom:1, spin:1, oy:.5, geo(o, g, t) {
+    const ring = (off, r0, amp, turn, c, w) => {
+      const pt = q => { const a = q * 2 * Math.PI + turn, r = r0 + wv(fold(q)) * amp; return [g.cx + r * Math.cos(a), g.cy + r * Math.sin(a)]; };
+      let p = pt(0);
+      for (let j = 0; j < K; j++) { const q = pt((j + 1) / K); put(o, off + j, p[0], p[1], q[0], q[1], c, w, 0); p = q; }
+    };
+    ring(0, g.s * (.17 + bass * .07), g.s * .12, t * .3 - Math.PI / 2, 0, 2.4 * g.u);
+    ring(K, g.s * (.07 + mid * .05), g.s * .05, -t * .5 - Math.PI / 2, .5, 1.6 * g.u);
+  }},
+  bars: {zoom:.45, spin:0, oy:.8, geo(o, g) {
+    const n = bars.length, bw = g.fw * .86 / n, x0 = g.cx - g.fw * .43, base = g.H * .8, top = g.H * .6, sw = bw * .76 * n / K;
+    for (let j = 0; j < K; j++) {   // each bar is a few thin strips side by side; its cap is the matching strokes of the second layer
+      const q = (j + .5) / K * n, i = Math.min(n - 1, Math.floor(q)), x = x0 + (i + .12 + .76 * (q - i)) * bw, c = i / n * .6;
+      put(o, j, x, base, x, base - Math.min(1, bars[i]) ** 1.3 * top, c, sw + .6, 0);
+      const y = base - peaks[i] ** 1.3 * top - 3.5 * g.u;
+      put(o, K + j, x - sw / 2, y, x + sw / 2, y, c, 1.6 * g.u, 1);
+    }
+  }},
+  scope: {zoom:.8, spin:.6, oy:.5, geo(o, g, t) {   // two jagged lines facing each other across a dark gap, slowly turning
+    const th = t * .12, cs = Math.cos(th), sn = Math.sin(th), L = Math.hypot(g.fw, g.H) * 1.05, gap = g.s * (.05 + bass * .09), amp = g.s * .13;
+    const pt = (q, side) => { const al = (q - .5) * L, off = side * (gap + Math.abs(wv(q)) * amp * 1.4 + wv(q) * amp * .4); return [g.cx + al * cs - off * sn, g.cy + al * sn + off * cs]; };
+    let a = pt(0, 1), b = pt(0, -1);
+    for (let j = 0; j < K; j++) {
+      const a1 = pt((j + 1) / K, 1), b1 = pt((j + 1) / K, -1);
+      put(o, j, a[0], a[1], a1[0], a1[1], 0, 2.4 * g.u, 0); put(o, K + j, b[0], b[1], b1[0], b1[1], 0, 2.4 * g.u, .4);
+      a = a1; b = b1;
+    }
+  }},
+  burst: {zoom:.9, spin:.8, oy:.5, geo(o, g, t) {
+    const n = bars.length, r0 = g.s * (.09 + kick * .03 + bass * .03), turn = t * .15 - Math.PI / 2, ri = r0 * .72;
+    const inner = q => { const a = q * 2 * Math.PI + turn, r = ri + wv(fold(q)) * g.s * .025; return [g.cx + r * Math.cos(a), g.cy + r * Math.sin(a)]; };
+    let p = inner(0);
+    for (let j = 0; j < K; j++) {   // mirrored, so the low notes meet at the top and the high notes at the bottom
+      const f = fold((j + .5) / K), i = Math.min(n - 1, Math.floor(f * n)), a = (j + .5) / K * 2 * Math.PI + turn, r1 = r0 + Math.min(1, bars[i]) ** 1.2 * g.s * .34, cs = Math.cos(a), sn = Math.sin(a);
+      put(o, j, g.cx + r0 * cs, g.cy + r0 * sn, g.cx + r1 * cs, g.cy + r1 * sn, f * .7, 1.6 * g.u, 0);
+      const q = inner((j + 1) / K); put(o, K + j, p[0], p[1], q[0], q[1], .5, 1.3 * g.u, 0); p = q;
+    }
+  }},
+};
+
+/* each scene has a weight; the chosen one grows to 1 while the others fade to 0, and the picture is the weighted mix.
+   Changing your mind halfway is fine: the mix just starts heading somewhere else. */
+const weight = Object.fromEntries(SCENES.map(s => [s, s === P.style ? 1 : 0])), geos = Object.fromEntries(SCENES.map(s => [s, makeGeo()])), mixed = makeGeo();
+const FIELDS = ['x0', 'y0', 'x1', 'y1', 'c', 'w', 'wh'], ss = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+let time = 0, last = 0, sceneClock = 0;
+function go(scene) { if (scene !== P.style) kit.setValue('scene.style', scene); sceneClock = 0; }
+const nextScene = () => go(SCENES[(SCENES.indexOf(P.style) + 1) % SCENES.length]);
+function shuffleScene() { const rest = SCENES.filter(s => s !== P.style); go(rest[Math.floor(Math.random() * rest.length)]); }
+
+function advance(dt) {
+  const d = dt / Math.max(.2, P.morph);
+  for (const s of SCENES) weight[s] = Math.min(1, Math.max(0, weight[s] + (s === P.style ? d : -d)));
+  if (P.shuffle && weight[P.style] >= 1 && (sceneClock += dt) > P.hold) shuffleScene();
+}
+function mixGeo(g, t) {
+  const act = SCENES.filter(s => weight[s] > 0);
+  for (const s of act) STYLES[s].geo(geos[s], g, t);
+  if (act.length === 1) return geos[act[0]];
+  const e = new Float32Array(act.length), tgt = Math.max(0, act.indexOf(P.style));
+  for (let j = 0; j < N; j++) {
+    const u = (j % K + .5) / K; let tot = 0;   // the change sweeps along the strokes instead of hitting them all at once
+    for (let a = 0; a < act.length; a++) { const w = weight[act[a]]; tot += e[a] = ss(a === tgt ? w * 1.5 - u * .5 : w * 1.5 - (1 - u) * .5); }
+    if (tot < 1e-4) { e.fill(0); e[tgt] = tot = 1; }
+    for (const f of FIELDS) { let v = 0; for (let a = 0; a < act.length; a++) v += geos[act[a]][f][j] * e[a]; mixed[f][j] = v / tot; }
+  }
+  return mixed;
+}
+
+function step(dt) {
+  const g = G, b = bufB.getContext('2d', {alpha:false}), k = dt * 60, calm = reduced ? .25 : 1;
+  let sz = 0, sp = 0, sy = 0, tot = 0;
+  for (const s of SCENES) { const e = ss(weight[s]); sz += STYLES[s].zoom * e; sp += STYLES[s].spin * e; sy += STYLES[s].oy * e; tot += e; }
+  sz /= tot; sp /= tot; sy /= tot;
+  const z = 1 + (P.zoom * .04 + kick * P.punch * .035) * sz * k * calm, rot = P.spin * .014 * sp * k * calm, ox = g.cx, oy = g.H * sy;
+  b.setTransform(1, 0, 0, 1, 0, 0); b.globalCompositeOperation = 'source-over'; b.globalAlpha = 1; b.fillStyle = '#000'; b.fillRect(0, 0, g.W, g.H);
+  if (P.trails > 0) {
+    b.globalAlpha = (P.trails ** .35) ** k;
+    b.translate(ox, oy); b.rotate(rot); b.scale(z, z); b.translate(-ox, -oy);
+    if (P.smear > 0 && 'filter' in b) b.filter = `blur(${(P.smear * 1.1 * g.u).toFixed(2)}px)`;   // each pass softens the old picture a little, so trails turn to smoke
+    b.drawImage(bufA, 0, 0);
+    if ('filter' in b) b.filter = 'none';
+    b.setTransform(1, 0, 0, 1, 0, 0); b.globalAlpha = 1;
+    // take a hair off every pixel so old trails reach true black instead of stalling at a dim grey
+    b.fillStyle = '#fff'; b.globalCompositeOperation = 'difference'; b.fillRect(0, 0, g.W, g.H);
+    b.fillStyle = 'rgb(1,1,1)'; b.globalCompositeOperation = 'lighter'; b.fillRect(0, 0, g.W, g.H);
+    b.fillStyle = '#fff'; b.globalCompositeOperation = 'difference'; b.fillRect(0, 0, g.W, g.H);
+  }
+  // the buffer holds brightness only; colour is put on when it is shown. Strokes pile up softly, so where they linger they glow white-hot
+  b.globalCompositeOperation = 'screen'; b.lineCap = 'round';
+  const o = mixGeo(g, time);
+  for (let j = 0; presence > .01 && j < N; j++) {
+    const v = Math.round(255 * presence * Math.min(1, (j < K ? .62 : .45) + .38 * o.wh[j]));
+    b.strokeStyle = `rgb(${v},${v},${v})`; b.lineWidth = o.w[j];
+    b.beginPath(); b.moveTo(o.x0[j], o.y0[j]); b.lineTo(o.x1[j], o.y1[j]); b.stroke();
+  }
+  [bufA, bufB] = [bufB, bufA];
+}
+// brightness becomes colour: dark is a deep tint of the current colour, the middle is the colour itself, the brightest parts burn to white
+const hot = document.createElement('canvas'), glow = document.createElement('canvas'), tinted = document.createElement('canvas');
+function present() {
+  const W = bufA.width, H = bufA.height, colour = col(0);
+  for (const c of [hot, glow, tinted]) if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const h = hot.getContext('2d'), c = tinted.getContext('2d');
+  h.globalCompositeOperation = 'copy'; h.drawImage(bufA, 0, 0); h.globalCompositeOperation = 'multiply'; h.drawImage(bufA, 0, 0); h.drawImage(bufA, 0, 0);   // brightness cubed: only the hottest parts
+  const gl = glow.getContext('2d'); gl.globalCompositeOperation = 'copy'; gl.drawImage(bufA, 0, 0); gl.globalCompositeOperation = 'screen'; gl.drawImage(bufA, 0, 0); gl.drawImage(bufA, 0, 0);   // lifted, so even faint smoke carries full colour
+  c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.fillStyle = colour; c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = 'multiply'; c.drawImage(glow, 0, 0);
+  c.globalCompositeOperation = 'lighter'; c.globalAlpha = .2 * presence; c.fillRect(0, 0, W, H); c.globalAlpha = 1;
+  c.globalCompositeOperation = 'screen'; c.drawImage(hot, 0, 0);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(tinted, 0, 0, canvas.width, canvas.height);
+}
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000 || 0); last = now; time += dt;
+  hue += dt * P.drift * .08;
+  analyse(dt, time); advance(dt); step(dt); present();
+  requestAnimationFrame(frame);
+}
+
+/* ==== wiring ==== */
+new ResizeObserver(layout).observe(canvas);
+document.addEventListener('fullscreenchange', layout);
+const toggleListen = () => source ? stopListening() : listenTab();
+const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+listenBtn.onclick = toggleListen;
+document.getElementById('micBtn').onclick = listenMic;
+document.getElementById('fsBtn').onclick = toggleFull;
+document.getElementById('resetBtn').onclick = () => kit.resetValues();
+document.getElementById('maxBtn').onclick = toggleFull;
+document.getElementById('minBtn').onclick = document.getElementById('closeBtn').onclick = () => { winEl.classList.toggle('min'); layout(); };
+winEl.querySelector('.title').ondblclick = e => { if (!e.target.closest('button')) { winEl.classList.toggle('min'); layout(); } };
+const clock = document.getElementById('clock'), tick = () => { clock.textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); };
+tick(); setInterval(tick, 10000);
+canvas.addEventListener('click', nextScene);
+canvas.addEventListener('dblclick', e => e.preventDefault());
+window.addEventListener('keydown', e => {
+  if (e.target.matches('input:not([type=range]), textarea, select, button, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey) return;   // typing or steering a control is not a shortcut
+  if (e.code === 'Space') { e.preventDefault(); toggleListen(); }
+  else if (e.key === 'f' || e.key === 'F') toggleFull();
+  else if (e.key === 'ArrowRight' || e.key === 'n') nextScene();
+});
+layout();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

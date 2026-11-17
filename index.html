@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Lightshow</title>
-<meta name="description" content="Lightshow: old-school music visuals that dance to whatever a browser tab is playing.">
+<meta name="description" content="Lightshow: old-school music visuals that dance to whatever your computer is playing.">
 <style>
   /* ==== a mid-nineties desktop: grey bevelled windows, navy title bars, square buttons, a grey taskbar ==== */
   :root {
@@ -105,7 +105,7 @@
   <main><canvas id="c" aria-label="A light show that moves to music. Click for the next scene."></canvas></main>
   <div class="balloons">
     <p class="balloon" id="toast" role="status"></p>
-    <p class="balloon tail" id="hint">Press <b>Space</b> and pick a tab that is playing music</p>
+    <p class="balloon tail" id="hint">Press <b>Space</b>, choose <b>Entire screen</b> and switch on <b>system audio</b></p>
   </div>
   <aside class="window" id="win">
     <div class="title">
@@ -115,7 +115,7 @@
       <button type="button" class="tb close" id="closeBtn" title="Close" aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></button>
     </div>
     <div class="body">
-      <p class="lead">Visuals that dance to whatever a tab is playing.</p>
+      <p class="lead">Visuals that dance to whatever is playing.</p>
       <div class="tabs" id="tabs" role="tablist"></div>
       <div class="sheet" id="panel"></div>
       <div class="actions"><button type="button" class="btn" id="resetBtn" title="Put every setting back where it started">Restore Defaults</button></div>
@@ -123,7 +123,7 @@
   </aside>
 </div>
 <footer class="taskbar">
-  <button type="button" class="start" id="listenBtn" title="Share a browser tab and its sound (Space)"><span>Listen to a tab</span></button>
+  <button type="button" class="start" id="listenBtn" title="Share your computer's sound, or a single tab (Space)"><span>Listen</span></button>
   <button type="button" class="task" id="micBtn" title="Listen through the microphone instead">Microphone</button>
   <button type="button" class="task" id="fsBtn" title="Fill the screen with the picture (F)">Full screen</button>
   <div class="tray" id="legend"><i class="dot"></i><span id="src">Not listening</span><time id="clock"></time></div>
@@ -257,7 +257,7 @@ function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); 
 
 function setSource(label) {
   srcEl.textContent = label || 'Not listening'; legend.classList.toggle('live', !!label);
-  listenBtn.firstElementChild.textContent = label ? 'Stop listening' : 'Listen to a tab'; listenBtn.classList.toggle('on', !!label);
+  listenBtn.firstElementChild.textContent = label ? 'Stop listening' : 'Listen'; listenBtn.classList.toggle('on', !!label);
 }
 function stopListening() {
   if (stream) stream.getTracks().forEach(t => { t.onended = null; t.stop(); });
@@ -280,13 +280,16 @@ async function listenTab() {
   let s;
   try {
     s = await navigator.mediaDevices.getDisplayMedia({
-      video: {frameRate:1, width:320, height:180},   // the browser insists on a picture; keep it tiny, it is never shown
+      // the browser insists on a picture; keep it tiny, it is never shown or sent anywhere.
+      // The picker opens on "Entire screen": sharing a tab makes the browser pin a "Sharing…" bar over the picture, sharing the screen does not
+      video: {displaySurface:'monitor', frameRate:1, width:320, height:180},
       audio: {echoCancellation:false, noiseSuppression:false, autoGainControl:false, suppressLocalAudioPlayback:false},
-      selfBrowserSurface:'exclude', systemAudio:'include',
+      selfBrowserSurface:'exclude', systemAudio:'include', monitorTypeSurfaces:'include',
     });
   } catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Sharing could not start. Try Chrome or Edge, or use Mic.'); return; }
-  if (!s.getAudioTracks().length) { s.getTracks().forEach(t => t.stop()); toast('No sound came along. Pick a tab and switch on “Also share tab audio”.'); return; }
-  attach(s, 'Tab audio');
+  if (!s.getAudioTracks().length) { s.getTracks().forEach(t => t.stop()); toast('No sound came along. Switch on “Also share system audio”, or pick a tab and switch on “Also share tab audio”.'); return; }
+  const v = s.getVideoTracks()[0], surface = v && v.getSettings().displaySurface;
+  attach(s, surface && surface !== 'browser' ? 'System audio' : 'Tab audio');
 }
 async function listenMic() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('This browser has no microphone access here.'); return; }

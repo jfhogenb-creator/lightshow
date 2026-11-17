@@ -142,7 +142,7 @@ const PALETTES = {   // each loops back to its first colour; the picture wears o
   candy:  ['#ff3df2','#8a4bff','#2ee6ff','#ffe45c','#ff3df2'],
   phosphor: ['#1bff4a','#b6ff3a','#0f9d3a','#7dffb0','#1bff4a'],
 };
-const SCENES = ['tunnel', 'skyline', 'scope', 'burst'];
+const SCENES = ['tunnel', 'skyline', 'scope', 'burst', 'warp', 'spiro', 'comb', 'ribbons'];
 
 /* every setting, by tab. Sliders are [start, lowest, highest, step], in numbers you would say out loud. */
 const SPEC = {
@@ -381,6 +381,43 @@ const STYLES = {
     const r0 = g.s * (.09 + kick * .03 + bass * .03);
     ring(o, 0, g, t * .15, f => r0 + band(bars, f) ** 1.2 * g.s * .34); ring(o, K, g, -t * .25, f => r0 * .72 + wv(f) * g.s * .025);
     o.w[0] = 2.2 * g.u; o.w[1] = 1.3 * g.u;
+  }},
+  warp: {zoom:1.5, spin:.35, oy:.5, geo(o, g, t) {   // a wobbling, lobed ring round a dark hole; the trails rush out as ripples
+    const R = g.s * (.13 + bass * .05), hole = g.s * (.075 + kick * .012);
+    for (let j = 0; j < K; j++) {
+      const q = j / K, a = Math.PI + q * 2 * Math.PI, f = fold(q);
+      const r = R * (1 + .2 * Math.sin(3 * a + t * .9) + .11 * Math.sin(5 * a - t * 1.4) + mid * .25 * Math.sin(2 * a + t * .5)) + wv(f) * g.s * .03;
+      o.x[j] = g.cx + r * Math.cos(a + t * .1); o.y[j] = g.cy + r * Math.sin(a + t * .1);
+      o.x[K + j] = g.cx + hole * Math.cos(a); o.y[K + j] = g.cy + hole * Math.sin(a);
+    }
+    o.w[0] = 2 * g.u; o.w[1] = 2.6 * g.u;
+  }},
+  spiro: {zoom:.55, spin:1.3, oy:.5, geo(o, g, t) {   // curls riding on a circle, like a drawing toy; the sound sets how big the curls are
+    const curl = (off, R, m, rho, turn, dir) => { for (let j = 0; j < K; j++) {
+      const q = j / K, a = Math.PI + q * 2 * Math.PI + turn, b = dir * m * a + t * .8, p = rho * (1 + wv(fold(q)) * .5);
+      o.x[off + j] = g.cx + R * Math.cos(a) + p * Math.cos(b); o.y[off + j] = g.cy + R * Math.sin(a) + p * Math.sin(b);
+    } };
+    curl(0, g.s * .26, 9, g.s * (.035 + bass * .09 + kick * .02), t * .12, 1);
+    curl(K, g.s * .12, 6, g.s * (.02 + treble * .08), -t * .2, -1);
+    o.w[0] = 1.6 * g.u; o.w[1] = 1.3 * g.u;
+  }},
+  comb: {zoom:.3, spin:.25, oy:.5, geo(o, g, t) {   // one line zigzagging between a ring and the spectrum: a crown of fine teeth
+    const r0 = g.s * (.16 + kick * .02), turn = t * .08;
+    for (let j = 0; j < K; j++) {
+      const q = j / K, a = Math.PI + q * 2 * Math.PI + turn, f = fold(q), tooth = j % 2, cs = Math.cos(a), sn = Math.sin(a);
+      const r = tooth ? r0 + g.s * .012 + band(bars, f) ** 1.1 * g.s * .26 : r0, ri = tooth ? r0 * .9 - g.s * .008 - band(peaks, f) * g.s * .07 : r0 * .9;
+      o.x[j] = g.cx + r * cs; o.y[j] = g.cy + r * sn; o.x[K + j] = g.cx + ri * cs; o.y[K + j] = g.cy + ri * sn;
+    }
+    o.w[0] = 1.3 * g.u; o.w[1] = 1.1 * g.u;
+  }},
+  ribbons: {zoom:.12, spin:0, oy:.5, geo(o, g, t) {   // slow braided waves that pinch shut at both ends; bass makes them swell, the sound itself roughens them
+    const A1 = g.s * (.05 + bass * .17), A2 = g.s * (.025 + mid * .11), wide = g.fw * .98;
+    for (let l = 0; l < 2; l++) for (let j = 0; j < K; j++) {
+      const q = j / K, f = fold(q), ph = (l * 2 + (q < .5 ? 0 : 1)) * 1.1, env = Math.sin(Math.PI * f) ** 1.3;
+      o.x[l * K + j] = g.cx + (f - .5) * wide;
+      o.y[l * K + j] = g.cy + env * (A1 * Math.sin(f * 7 + t * 1.1 + ph) + A2 * Math.sin(f * 13 - t * 1.6 + ph * 2) + wv(f) * g.s * .035);
+    }
+    o.w[0] = 1.8 * g.u; o.w[1] = 1.3 * g.u;
   }},
 };
 

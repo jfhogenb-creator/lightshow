@@ -142,7 +142,7 @@ const PALETTES = {   // each loops back to its first colour; the picture wears o
   candy:  ['#ff3df2','#8a4bff','#2ee6ff','#ffe45c','#ff3df2'],
   phosphor: ['#1bff4a','#b6ff3a','#0f9d3a','#7dffb0','#1bff4a'],
 };
-const SCENES = ['tunnel', 'bars', 'scope', 'burst'];
+const SCENES = ['tunnel', 'skyline', 'scope', 'burst'];
 
 /* every setting, by tab. Sliders are [start, lowest, highest, step], in numbers you would say out loud. */
 const SPEC = {
@@ -337,60 +337,57 @@ function layout() {
   G = {W, H, cx:fw / 2, cy:H / 2, s:Math.min(fw, H), fw, u:Math.min(fw, H) / 420};
 }
 
-/* Every scene is the same 512 strokes, arranged differently: two layers of 256 short lines, each with two ends, a colour and a width.
-   Because the scenes share their strokes, any scene can turn into any other by sliding each stroke from one place to the next. */
+/* Every scene is the same two closed loops of 256 points each, bent into a different shape.
+   Because a loop never has to be cut to become another loop, one scene flows into the next without breaking:
+   a ring flattens into two facing lines, the lines swell into a skyline, the skyline curls into a star. */
 const K = 256, N = 2 * K;
-const makeGeo = () => ({x0:new Float32Array(N), y0:new Float32Array(N), x1:new Float32Array(N), y1:new Float32Array(N), c:new Float32Array(N), w:new Float32Array(N), wh:new Float32Array(N)});
+const makeGeo = () => ({x:new Float32Array(N), y:new Float32Array(N), w:[1, 1]});
 const wv = q => { const x = Math.min(1, Math.max(0, q)) * (WAVE - 1), i = Math.min(WAVE - 2, Math.floor(x)); return wave[i] + (wave[i + 1] - wave[i]) * (x - i); };
-const fold = q => q < .5 ? q * 2 : 2 - 2 * q;   // there and back again, so a ring has no seam
-const put = (o, j, x0, y0, x1, y1, c, w, wh) => { o.x0[j] = x0; o.y0[j] = y0; o.x1[j] = x1; o.y1[j] = y1; o.c[j] = c; o.w[j] = w; o.wh[j] = wh; };
+const band = (arr, q) => { const n = arr.length, x = Math.min(1, Math.max(0, q)) * (n - 1), i = Math.min(n - 2, Math.floor(x)), f = x - i, e = f * f * (3 - 2 * f); return Math.min(1, arr[i] + (arr[i + 1] - arr[i]) * e); };   // the spectrum as a smooth curve
+const fold = q => q < .5 ? q * 2 : 2 - 2 * q;   // out along the top, back along the bottom
+// a ring: point 0 sits on the left, the loop runs over the top to the right and back underneath, the same way round as the flat scenes
+function ring(o, off, g, turn, radius) {
+  for (let j = 0; j < K; j++) { const q = j / K, a = Math.PI + q * 2 * Math.PI + turn, r = radius(fold(q)); o.x[off + j] = g.cx + r * Math.cos(a); o.y[off + j] = g.cy + r * Math.sin(a); }
+}
 
 const STYLES = {
   // zoom / spin: how strongly the trails rush outwards and turn; oy: the height the trails flow away from
   tunnel: {zoom:1, spin:1, oy:.5, geo(o, g, t) {
-    const ring = (off, r0, amp, turn, c, w) => {
-      const pt = q => { const a = q * 2 * Math.PI + turn, r = r0 + wv(fold(q)) * amp; return [g.cx + r * Math.cos(a), g.cy + r * Math.sin(a)]; };
-      let p = pt(0);
-      for (let j = 0; j < K; j++) { const q = pt((j + 1) / K); put(o, off + j, p[0], p[1], q[0], q[1], c, w, 0); p = q; }
-    };
-    ring(0, g.s * (.17 + bass * .07), g.s * .12, t * .3 - Math.PI / 2, 0, 2.4 * g.u);
-    ring(K, g.s * (.07 + mid * .05), g.s * .05, -t * .5 - Math.PI / 2, .5, 1.6 * g.u);
+    const r0 = g.s * (.17 + bass * .07), r1 = g.s * (.07 + mid * .05);
+    ring(o, 0, g, t * .3, f => r0 + wv(f) * g.s * .12); ring(o, K, g, -t * .5, f => r1 + wv(f) * g.s * .05);
+    o.w[0] = 2.4 * g.u; o.w[1] = 1.6 * g.u;
   }},
-  bars: {zoom:.45, spin:0, oy:.8, geo(o, g) {
-    const n = bars.length, bw = g.fw * .86 / n, x0 = g.cx - g.fw * .43, base = g.H * .8, top = g.H * .6, sw = bw * .76 * n / K;
-    for (let j = 0; j < K; j++) {   // each bar is a few thin strips side by side; its cap is the matching strokes of the second layer
-      const q = (j + .5) / K * n, i = Math.min(n - 1, Math.floor(q)), x = x0 + (i + .12 + .76 * (q - i)) * bw, c = i / n * .6;
-      put(o, j, x, base, x, base - Math.min(1, bars[i]) ** 1.3 * top, c, sw + .6, 0);
-      const y = base - peaks[i] ** 1.3 * top - 3.5 * g.u;
-      put(o, K + j, x - sw / 2, y, x + sw / 2, y, c, 1.6 * g.u, 1);
-    }
-  }},
-  scope: {zoom:.8, spin:.6, oy:.5, geo(o, g, t) {   // two jagged lines facing each other across a dark gap, slowly turning
-    const th = t * .12, cs = Math.cos(th), sn = Math.sin(th), L = Math.hypot(g.fw, g.H) * 1.05, gap = g.s * (.05 + bass * .09), amp = g.s * .13;
-    const pt = (q, side) => { const al = (q - .5) * L, off = side * (gap + Math.abs(wv(q)) * amp * 1.4 + wv(q) * amp * .4); return [g.cx + al * cs - off * sn, g.cy + al * sn + off * cs]; };
-    let a = pt(0, 1), b = pt(0, -1);
+  skyline: {zoom:.5, spin:.15, oy:.62, geo(o, g) {   // the spectrum as a ridge with its reflection; the outer loop is where the peaks hang
+    const base = g.H * .62, top = g.H * .46, wide = g.fw * .92;
     for (let j = 0; j < K; j++) {
-      const a1 = pt((j + 1) / K, 1), b1 = pt((j + 1) / K, -1);
-      put(o, j, a[0], a[1], a1[0], a1[1], 0, 2.4 * g.u, 0); put(o, K + j, b[0], b[1], b1[0], b1[1], 0, 2.4 * g.u, .4);
-      a = a1; b = b1;
+      const q = j / K, f = fold(q), up = q < .5, taper = Math.sin(Math.PI * f) ** .6, x = g.cx + (f - .5) * wide;
+      const h = band(bars, f) ** 1.3 * top * taper, hp = band(peaks, f) ** 1.3 * top * taper + 5 * g.u * taper;
+      o.x[j] = x; o.y[j] = up ? base - h : base + h * .35;
+      o.x[K + j] = x; o.y[K + j] = up ? base - hp : base + hp * .35;
     }
+    o.w[0] = 2.4 * g.u; o.w[1] = 1.3 * g.u;
   }},
-  burst: {zoom:.9, spin:.8, oy:.5, geo(o, g, t) {
-    const n = bars.length, r0 = g.s * (.09 + kick * .03 + bass * .03), turn = t * .15 - Math.PI / 2, ri = r0 * .72;
-    const inner = q => { const a = q * 2 * Math.PI + turn, r = ri + wv(fold(q)) * g.s * .025; return [g.cx + r * Math.cos(a), g.cy + r * Math.sin(a)]; };
-    let p = inner(0);
-    for (let j = 0; j < K; j++) {   // mirrored, so the low notes meet at the top and the high notes at the bottom
-      const f = fold((j + .5) / K), i = Math.min(n - 1, Math.floor(f * n)), a = (j + .5) / K * 2 * Math.PI + turn, r1 = r0 + Math.min(1, bars[i]) ** 1.2 * g.s * .34, cs = Math.cos(a), sn = Math.sin(a);
-      put(o, j, g.cx + r0 * cs, g.cy + r0 * sn, g.cx + r1 * cs, g.cy + r1 * sn, f * .7, 1.6 * g.u, 0);
-      const q = inner((j + 1) / K); put(o, K + j, p[0], p[1], q[0], q[1], .5, 1.3 * g.u, 0); p = q;
+  scope: {zoom:.8, spin:.6, oy:.5, geo(o, g, t) {   // jagged lines facing each other across a dark gap, slowly turning; each pair joins up far off screen
+    const th = t * .12, cs = Math.cos(th), sn = Math.sin(th), L = Math.hypot(g.W, g.H) * 1.5, gap = g.s * (.05 + bass * .09), amp = g.s * .13;
+    for (let j = 0; j < K; j++) {
+      const q = j / K, f = fold(q), side = q < .5 ? -1 : 1, al = (f - .5) * L, v = wv(f);
+      const outer = side * (gap + Math.abs(v) * amp * 1.4 + v * amp * .4), inner = side * (gap * .3 + Math.abs(v) * amp * .35);
+      o.x[j] = g.cx + al * cs - outer * sn; o.y[j] = g.cy + al * sn + outer * cs;
+      o.x[K + j] = g.cx + al * cs - inner * sn; o.y[K + j] = g.cy + al * sn + inner * cs;
     }
+    o.w[0] = 2.4 * g.u; o.w[1] = 1.2 * g.u;
+  }},
+  burst: {zoom:.9, spin:.8, oy:.5, geo(o, g, t) {   // the spectrum wrapped round a circle: low notes on the left, high notes on the right
+    const r0 = g.s * (.09 + kick * .03 + bass * .03);
+    ring(o, 0, g, t * .15, f => r0 + band(bars, f) ** 1.2 * g.s * .34); ring(o, K, g, -t * .25, f => r0 * .72 + wv(f) * g.s * .025);
+    o.w[0] = 2.2 * g.u; o.w[1] = 1.3 * g.u;
   }},
 };
 
 /* each scene has a weight; the chosen one grows to 1 while the others fade to 0, and the picture is the weighted mix.
    Changing your mind halfway is fine: the mix just starts heading somewhere else. */
 const weight = Object.fromEntries(SCENES.map(s => [s, s === P.style ? 1 : 0])), geos = Object.fromEntries(SCENES.map(s => [s, makeGeo()])), mixed = makeGeo();
-const FIELDS = ['x0', 'y0', 'x1', 'y1', 'c', 'w', 'wh'], ss = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
+const ss = x => x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x);
 let time = 0, last = 0, sceneClock = 0;
 function go(scene) { if (scene !== P.style) kit.setValue('scene.style', scene); sceneClock = 0; }
 const nextScene = () => go(SCENES[(SCENES.indexOf(P.style) + 1) % SCENES.length]);
@@ -406,11 +403,15 @@ function mixGeo(g, t) {
   for (const s of act) STYLES[s].geo(geos[s], g, t);
   if (act.length === 1) return geos[act[0]];
   const e = new Float32Array(act.length), tgt = Math.max(0, act.indexOf(P.style));
+  let wt = 0; mixed.w[0] = mixed.w[1] = 0;
+  for (let a = 0; a < act.length; a++) { const k = ss(weight[act[a]]); wt += k; mixed.w[0] += geos[act[a]].w[0] * k; mixed.w[1] += geos[act[a]].w[1] * k; }
+  mixed.w[0] /= wt; mixed.w[1] /= wt;
   for (let j = 0; j < N; j++) {
-    const u = (j % K + .5) / K; let tot = 0;   // the change sweeps along the strokes instead of hitting them all at once
+    const u = fold((j % K) / K); let tot = 0;   // the change rolls along the loop from left to right, the same on the way out and the way back, so the loop never tears
     for (let a = 0; a < act.length; a++) { const w = weight[act[a]]; tot += e[a] = ss(a === tgt ? w * 1.5 - u * .5 : w * 1.5 - (1 - u) * .5); }
     if (tot < 1e-4) { e.fill(0); e[tgt] = tot = 1; }
-    for (const f of FIELDS) { let v = 0; for (let a = 0; a < act.length; a++) v += geos[act[a]][f][j] * e[a]; mixed[f][j] = v / tot; }
+    let x = 0, y = 0; for (let a = 0; a < act.length; a++) { x += geos[act[a]].x[j] * e[a]; y += geos[act[a]].y[j] * e[a]; }
+    mixed.x[j] = x / tot; mixed.y[j] = y / tot;
   }
   return mixed;
 }
@@ -437,10 +438,13 @@ function step(dt) {
   // the buffer holds brightness only; colour is put on when it is shown. Strokes pile up softly, so where they linger they glow white-hot
   b.globalCompositeOperation = 'screen'; b.lineCap = 'round';
   const o = mixGeo(g, time);
-  for (let j = 0; presence > .01 && j < N; j++) {
-    const v = Math.round(255 * presence * Math.min(1, (j < K ? .62 : .45) + .38 * o.wh[j]));
-    b.strokeStyle = `rgb(${v},${v},${v})`; b.lineWidth = o.w[j];
-    b.beginPath(); b.moveTo(o.x0[j], o.y0[j]); b.lineTo(o.x1[j], o.y1[j]); b.stroke();
+  b.lineJoin = 'round';
+  for (let l = 0; presence > .01 && l < 2; l++) {   // each loop is one unbroken line
+    const v = Math.round(255 * presence * (l ? .5 : .68)), off = l * K;
+    b.strokeStyle = `rgb(${v},${v},${v})`; b.lineWidth = o.w[l];
+    b.beginPath(); b.moveTo(o.x[off], o.y[off]);
+    for (let j = 1; j < K; j++) b.lineTo(o.x[off + j], o.y[off + j]);
+    b.closePath(); b.stroke();
   }
   [bufA, bufB] = [bufB, bufA];
 }

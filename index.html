@@ -255,7 +255,9 @@ const listenBtn = document.getElementById('listenBtn');
 const toastEl = document.getElementById('toast'); let toastTimer = 0;
 function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 4200); }
 
+let sourceLabel = '';
 function setSource(label) {
+  sourceLabel = label || '';
   srcEl.textContent = label || 'Not listening'; legend.classList.toggle('live', !!label);
   listenBtn.firstElementChild.textContent = label ? 'Stop listening' : 'Listen to a tab'; listenBtn.classList.toggle('on', !!label);
 }
@@ -321,16 +323,17 @@ function analyse(dt, t) {
 
 /* ==== the picture: every frame the last one is redrawn slightly zoomed, turned and dimmed, then the new shape goes on top ==== */
 const winEl = document.getElementById('win'), canvas = document.getElementById('c'), ctx = canvas.getContext('2d', {alpha:false});
+let view = canvas, vctx = ctx, stage = null;   // where the picture is shown: this page, or its own window (see popOut)
 let bufA = document.createElement('canvas'), bufB = document.createElement('canvas');
 let G = {W:1, H:1, cx:0, cy:0, s:1, fw:1, u:1};
 
 function layout() {
-  const cr = canvas.getBoundingClientRect(), ar = document.querySelector('aside').getBoundingClientRect();
-  const dpr = Math.min(devicePixelRatio || 1, 2), w = Math.max(1, Math.round(cr.width * dpr)), h = Math.max(1, Math.round(cr.height * dpr));
-  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  const cr = view.getBoundingClientRect(), ar = document.querySelector('aside').getBoundingClientRect();
+  const dpr = Math.min((stage || window).devicePixelRatio || 1, 2), w = Math.max(1, Math.round(cr.width * dpr)), h = Math.max(1, Math.round(cr.height * dpr));
+  if (view.width !== w || view.height !== h) { view.width = w; view.height = h; }
   const k = Math.min(1, (200 + P.detail * 11) / Math.max(cr.width, cr.height)), W = Math.max(1, Math.round(cr.width * k)), H = Math.max(1, Math.round(cr.height * k));   // a small, soft buffer, as these old light shows were: chunky up close, glowing from a distance
   for (const b of [bufA, bufB]) if (b.width !== W || b.height !== H) { b.width = W; b.height = H; }
-  const side = !winEl.classList.contains('min') && ar.width > 0 && ar.top < cr.bottom - 1 && ar.left > cr.left, fw = (side ? ar.left - cr.left : cr.width) * k;   // compose in the space beside the panel
+  const side = view === canvas && !winEl.classList.contains('min') && ar.width > 0 && ar.top < cr.bottom - 1 && ar.left > cr.left, fw = (side ? ar.left - cr.left : cr.width) * k;   // compose in the space beside the panel
   G = {W, H, cx:fw / 2, cy:H / 2, s:Math.min(fw, H), fw, u:Math.min(fw, H) / 420};
 }
 
@@ -453,21 +456,53 @@ function present() {
   c.globalCompositeOperation = 'multiply'; c.drawImage(glow, 0, 0);
   c.globalCompositeOperation = 'lighter'; c.globalAlpha = .2 * presence; c.fillRect(0, 0, W, H); c.globalAlpha = 1;
   c.globalCompositeOperation = 'screen'; c.drawImage(hot, 0, 0);
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(tinted, 0, 0, canvas.width, canvas.height);
+  vctx.setTransform(1, 0, 0, 1, 0, 0); vctx.globalCompositeOperation = 'source-over'; vctx.imageSmoothingEnabled = true; vctx.imageSmoothingQuality = 'high';
+  vctx.drawImage(tinted, 0, 0, view.width, view.height);
 }
-function frame(now) {
-  const dt = Math.min(.05, (now - last) / 1000 || 0); last = now; time += dt;
+// the loop runs on the clock of whichever window shows the picture, so it stays smooth when this page is in the background
+let loopId = 0;
+function schedule() { const id = ++loopId; (stage || window).requestAnimationFrame(() => { if (id === loopId) frame(); }); }
+function frame() {
+  const now = performance.now(), dt = Math.max(0, Math.min(.05, (now - last) / 1000 || 0)); last = now; time += dt;
   hue += dt * P.drift * .08;
   analyse(dt, time); advance(dt); step(dt); present();
-  requestAnimationFrame(frame);
+  schedule();
 }
 
 /* ==== wiring ==== */
 new ResizeObserver(layout).observe(canvas);
 document.addEventListener('fullscreenchange', layout);
 const toggleListen = () => source ? stopListening() : listenTab();
-const toggleFull = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+/* Full screen while a tab is shared: the browser pins a "Sharing…" bar to the page that listens, and keeps it there even in full screen.
+   So the picture moves to a window of its own, which has no such bar, and that window fills the screen. */
+function popOut() {
+  const w = window.open('', 'lightshow-stage', `popup,left=0,top=0,width=${screen.availWidth},height=${screen.availHeight}`);
+  if (!w) { toast('Allow pop-ups for this page to go full screen while a tab is shared.'); return; }
+  const d = w.document; d.title = 'Lightshow'; d.body.style.cssText = 'margin:0;background:#000;overflow:hidden;cursor:pointer';
+  const c = d.createElement('canvas'), tip = d.createElement('p');
+  c.style.cssText = 'display:block;width:100vw;height:100vh';
+  tip.textContent = 'Click to fill the screen'; tip.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);margin:0;padding:3px 6px;border:1px solid #000;background:#ffffe1;color:#000;font:11px Tahoma,Geneva,sans-serif;pointer-events:none';
+  d.body.replaceChildren(c, tip);
+  const fill = () => { tip.remove(); if (!d.fullscreenElement && d.documentElement.requestFullscreen) d.documentElement.requestFullscreen().catch(() => {}); };
+  c.addEventListener('click', () => d.fullscreenElement ? nextScene() : fill());
+  w.addEventListener('keydown', e => { if (e.key === 'f' || e.key === 'F' || e.key === 'Enter') d.fullscreenElement ? popIn() : fill(); else if (e.key === 'ArrowRight' || e.key === 'n') nextScene(); else if (e.key === 'Escape') popIn(); });
+  d.addEventListener('fullscreenchange', () => { if (!d.fullscreenElement) popIn(); });   // leaving full screen brings the picture home
+  w.addEventListener('resize', layout); w.addEventListener('pagehide', popIn);
+  stage = w; view = c; vctx = c.getContext('2d', {alpha:false}); document.getElementById('fsBtn').classList.add('on');
+  layout(); schedule();
+}
+function popIn() {
+  if (!stage) return;
+  const w = stage; stage = null; view = canvas; vctx = ctx; document.getElementById('fsBtn').classList.remove('on');
+  try { w.close(); } catch (e) {}
+  layout(); schedule();
+}
+setInterval(() => { if (stage && stage.closed) popIn(); }, 500);
+const toggleFull = () => {
+  if (stage) return popIn();
+  if (sourceLabel === 'Tab audio' && !document.fullscreenElement) return popOut();
+  return document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+};
 listenBtn.onclick = toggleListen;
 document.getElementById('micBtn').onclick = listenMic;
 document.getElementById('fsBtn').onclick = toggleFull;
@@ -486,7 +521,7 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight' || e.key === 'n') nextScene();
 });
 layout();
-requestAnimationFrame(frame);
+schedule();
 })();
 </script>
 </body>

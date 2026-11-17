@@ -285,6 +285,7 @@ async function listenTab() {
       video: {frameRate:1, width:320, height:180},   // the browser insists on a picture; keep it tiny, it is never shown
       audio: {echoCancellation:false, noiseSuppression:false, autoGainControl:false, suppressLocalAudioPlayback:false},
       selfBrowserSurface:'exclude', systemAudio:'include',
+      surfaceSwitching:'exclude',   // no "Share this tab instead" offer, which is what puts the browser's sharing bar on every other tab and window
     });
   } catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast('Sharing could not start. Try Chrome or Edge, or use Mic.'); return; }
   if (!s.getAudioTracks().length) { s.getTracks().forEach(t => t.stop()); toast('No sound came along. Pick a tab and switch on “Also share tab audio”.'); return; }
